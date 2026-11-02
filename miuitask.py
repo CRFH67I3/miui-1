@@ -42,11 +42,14 @@ TASK_ACTION_LABELS = {
     'board_follow': '加入圈子',
 }
 # 需要显式开关才执行的动作（原项目视为有风险，默认关闭）
+#
+# 注意：浏览专题页不在这里。这条任务只在活动期间出现，靠任务列表天然门控：
+# 列表里没有这个任务就一次请求都不发，有且未完成才执行，因此不需要额外开关，
+# 也不需要人工判断"今天到底有没有专题页活动"。
 TASK_ACTION_RISK_SWITCH = {
     'wechat_checkin': 'check-in',
     'check_in': 'check-in',
     'carrot_pull': 'carrot-pull',
-    'browse_specialpage': 'browse-specialpage',
 }
 
 # ==================== 奖励类型：只保留「给成长值」的任务 ====================
@@ -100,6 +103,7 @@ HUMAN_CHECK_CODE = 640
 TASK_ACTION_NOTES = {
     'wechat_checkin': '走微信小程序通道，无人机校验；已签到则一次请求都不发',
     'check_in': 'App 内 checkinV2 有人机校验（640），脚本通常做不了，需要手动点一次',
+    'browse_specialpage': '活动期间任务列表里出现才做，没有这条任务时不发请求',
 }
 # 这些动作即使开着开关也不自动执行：做了也是白发请求，只会多留一份脚本痕迹
 TASK_ACTION_MANUAL_ONLY = frozenset({'check_in'})
@@ -1437,11 +1441,16 @@ def process_exception(e: Exception):
         w_log('系统设置了代理，出现异常')
 
 
-def _task_switches(check_in, carrot_pull, browse_specialpage):
+def _task_switches(check_in, carrot_pull, browse_specialpage=False):
+    """
+    开关字典。专题页恒为 True —— 它由任务列表门控，不是由开关门控：
+    列表里没有「浏览限时专题页」这条任务时，analyze_tasks 根本不会产生该动作。
+    参数 browse_specialpage 仅为兼容旧调用（--legacy 里才真正用到）。
+    """
     return {
         'check-in': bool(check_in),
         'carrot-pull': bool(carrot_pull),
-        'browse-specialpage': bool(browse_specialpage),
+        'browse-specialpage': True,
     }
 
 
@@ -1456,6 +1465,9 @@ def start(miui_task: MIUITask, check_in: bool, carrot_pull: bool, browse_special
 
     growth_only=True（默认）时再收窄一层：只处理奖励含「成长值」的任务，
     升级 App、拔萝卜（发金币）这类与成长等级无关的任务直接忽略，一次请求都不发。
+
+    专题页任务不看开关，只看任务列表：活动期间列表里出现且未完成才做，
+    平时没有这条任务就一次请求都不发。
     """
     # 启动前抖动：避免定时任务在整点秒级固定发起登录
     random_sleep()
@@ -1471,8 +1483,8 @@ def start(miui_task: MIUITask, check_in: bool, carrot_pull: bool, browse_special
         return
 
     switches = _task_switches(check_in, carrot_pull, browse_specialpage)
-    w_log('风险功能开关：签到=%s 拔萝卜=%s 专题页=%s'
-          % (check_in, carrot_pull, browse_specialpage))
+    w_log('风险功能开关：签到=%s 拔萝卜=%s 专题页=自动（任务列表里有才做）'
+          % (check_in, carrot_pull))
     if growth_only:
         w_log('任务范围：只处理能获得社区成长值的任务，其余一律忽略')
 

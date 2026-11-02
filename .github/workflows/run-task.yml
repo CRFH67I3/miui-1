@@ -6,18 +6,20 @@ name: MIUI Task
 # 3. cron 使用 UTC 时间，0 20 * * * = 北京时间次日 04:00
 #
 # 需要配置的 Repository secrets（Settings > Secrets and variables > Actions）：
-#   MIUI_COOKIE         推荐  已登录的社区 Cookie。云端收不到短信，账号一旦被要求短信验证
-#                            就只能靠它；配置后不再需要 MIUI_PASSWORD
-#   MIUI_UID            必填  小米账户 ID（纯数字，不是用户名/手机号）；用 Cookie 登录时可留空
-#   MIUI_PASSWORD       必填  小米账户密码明文，脚本会自动转大写 MD5（有 MIUI_COOKIE 时可省）
-#   MIUI_USER_AGENT     可选  登录社区所用 UA，留空用内置默认值
-#   MIUI_EXTRA_ACCOUNTS 可选  多账号，JSON 数组（每项可带自己的 cookie）
+#   MIUI_COOKIE         唯一必填  已登录的社区 Cookie。云端收不到短信，账号一旦被要求短信验证
+#                                就只能靠它；配置后不再需要 MIUI_UID / MIUI_PASSWORD
+#   MIUI_UID            可选      小米账户 ID（纯数字）。用 Cookie 登录时留空即可
+#   MIUI_PASSWORD       可选      小米账户密码明文，脚本会自动转大写 MD5（有 Cookie 时不建议配）
+#   MIUI_USER_AGENT     可选      登录社区所用 UA，留空用内置默认值
 #
-# 需要配置的 Repository variables（同一页面的 Variables 标签）：
-#   MIUI_CHECK_IN           可选  true/false  成长值签到（默认 false，有风险）
-#   MIUI_CARROT_PULL        可选  true/false  社区拔萝卜（默认 false，有风险）
-#   MIUI_BROWSE_SPECIALPAGE 可选  true/false  浏览限时专题页（默认 false）
-#   MIUI_LOGGING            可选  true/false  归档日志到 logs/（默认 true）
+# 需要配置的 Repository variables（同一页面的 Variables 标签，不填也有默认值）：
+#   MIUI_CHECK_IN   默认 true   成长值签到（含微信小程序签到）。签到前会先查状态，
+#                               已签到或状态不明确时一个请求都不发，开着不会重复签到
+#   MIUI_LOGGING    默认 true   归档日志到 logs/ 并作为 artifact 上传
+#   MIUI_CARROT_PULL 默认 false  社区拔萝卜（只发金币不发成长值，成长值模式下会被忽略）
+#
+# 专题页任务（浏览限时专题页）不需要开关：脚本每天先拉任务列表，
+# 列表里有这条且未完成才执行，没有就一次请求都不发。
 
 on:
   schedule:
@@ -58,14 +60,11 @@ jobs:
           MIUI_PASSWORD: ${{ secrets.MIUI_PASSWORD }}
           MIUI_COOKIE: ${{ secrets.MIUI_COOKIE }}
           MIUI_USER_AGENT: ${{ secrets.MIUI_USER_AGENT }}
-          MIUI_EXTRA_ACCOUNTS: ${{ secrets.MIUI_EXTRA_ACCOUNTS }}
           MIUI_CHECK_IN: ${{ vars.MIUI_CHECK_IN }}
           MIUI_CARROT_PULL: ${{ vars.MIUI_CARROT_PULL }}
-          MIUI_BROWSE_SPECIALPAGE: ${{ vars.MIUI_BROWSE_SPECIALPAGE }}
           MIUI_LOGGING: ${{ vars.MIUI_LOGGING }}
         run: |
           python - <<'PY'
-          import json
           import os
           import sys
 
@@ -90,69 +89,39 @@ jobs:
               return str(raw).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
 
 
-          def make_account(uid, password, ua, source, cookie=''):
-              cookie = str(cookie or '').strip().replace('\r', '').replace('\n', '')
-              uid = str(uid or '').strip()
-              password = str(password or '').strip()
+          uid = str(os.environ.get('MIUI_UID', '') or '').strip()
+          password = str(os.environ.get('MIUI_PASSWORD', '') or '').strip()
+          cookie = (str(os.environ.get('MIUI_COOKIE', '') or '')
+                    .strip().replace('\r', '').replace('\n', ''))
+          ua = str(os.environ.get('MIUI_USER_AGENT', '') or '').strip()
 
-              if not cookie:
-                  if not uid or not password:
-                      fail('账号信息不完整（%s）：uid / password 不能为空，'
-                           '或改用 MIUI_COOKIE 方式登录' % source)
-              if uid and not uid.isdigit():
-                  fail('uid 必须是纯数字的小米账户 ID（%s），当前值不是纯数字' % source)
-
-              account = {
-                  'uid': uid,
-                  'user-agent': (str(ua).strip() if ua else DEFAULT_UA),
-                  'carrot-pull': truthy('MIUI_CARROT_PULL'),
-                  'check-in': truthy('MIUI_CHECK_IN'),
-                  'browse-specialpage': truthy('MIUI_BROWSE_SPECIALPAGE'),
-              }
-              if cookie:
-                  # Cookie 登录：不需要密码，也不会触发短信验证（Actions 里也收不到短信）
-                  account['cookie'] = cookie
-              else:
-                  account['password'] = password
-              return account
-
-
-          uid = os.environ.get('MIUI_UID', '')
-          password = os.environ.get('MIUI_PASSWORD', '')
-          cookie = os.environ.get('MIUI_COOKIE', '')
-          ua = os.environ.get('MIUI_USER_AGENT', '')
-
-          if not cookie.strip() and (not uid.strip() or not password.strip()):
+          if not cookie and (not uid or not password):
               fail('缺少登录凭据：请配置 MIUI_COOKIE（推荐，免短信验证），'
                    '或同时配置 MIUI_UID 和 MIUI_PASSWORD')
+          if uid and not uid.isdigit():
+              fail('MIUI_UID 必须是纯数字的小米账户 ID，当前值不是纯数字')
 
-          for secret in (password.strip(), cookie.strip()):
+          for secret in (password, cookie):
               if secret:
                   print('::add-mask::' + secret)
 
-          accounts = [make_account(uid, password, ua, '主账号', cookie)]
-
-          extra = (os.environ.get('MIUI_EXTRA_ACCOUNTS') or '').strip()
-          if extra:
-              try:
-                  parsed = json.loads(extra)
-              except Exception as exc:
-                  fail('MIUI_EXTRA_ACCOUNTS 不是合法 JSON：%s' % exc)
-              if not isinstance(parsed, list):
-                  fail('MIUI_EXTRA_ACCOUNTS 必须是 JSON 数组')
-              for idx, item in enumerate(parsed):
-                  if not isinstance(item, dict):
-                      fail('MIUI_EXTRA_ACCOUNTS 第 %d 项必须是对象' % (idx + 1))
-                  accounts.append(make_account(
-                      item.get('uid', ''),
-                      item.get('password', ''),
-                      item.get('user-agent') or ua,
-                      '附加账号 #%d' % (idx + 1),
-                      item.get('cookie', ''),
-                  ))
+          account = {
+              'uid': uid,
+              'user-agent': ua or DEFAULT_UA,
+              'carrot-pull': truthy('MIUI_CARROT_PULL'),
+              # 签到默认开启：签到前会先查状态，已签到或状态不明都不发请求
+              'check-in': truthy('MIUI_CHECK_IN', default=True),
+              # 专题页由任务列表门控，这里恒为 false，保留字段只是为了兼容旧配置
+              'browse-specialpage': False,
+          }
+          if cookie:
+              # Cookie 登录：不需要密码，也不会触发短信验证（Actions 里收不到短信）
+              account['cookie'] = cookie
+          else:
+              account['password'] = password
 
           config = {
-              'accounts': accounts,
+              'accounts': [account],
               'logging': truthy('MIUI_LOGGING', default=True),
               'version': 'v1.5.2',
           }
@@ -160,14 +129,12 @@ jobs:
           with open('config.yaml', 'w', encoding='utf-8') as fp:
               yaml.safe_dump(config, fp, allow_unicode=True, sort_keys=False)
 
-          print('已生成 config.yaml，账号数：%d' % len(accounts))
-          for idx, acc in enumerate(accounts, 1):
-              print('  账号 %d  uid=%s  登录方式=%s  check-in=%s  carrot-pull=%s  '
-                    'browse-specialpage=%s  ua=%s'
-                    % (idx, acc['uid'] or '(来自 Cookie)', 'Cookie' if acc.get('cookie') else '账号密码',
-                       acc['check-in'], acc['carrot-pull'],
-                       acc['browse-specialpage'], acc['user-agent'][:40]))
-          print('logging=%s' % config['logging'])
+          print('已生成 config.yaml')
+          print('  uid=%s  登录方式=%s  签到=%s  拔萝卜=%s  专题页=%s  ua=%s'
+                % (uid or '(来自 Cookie)', 'Cookie' if cookie else '账号密码',
+                   account['check-in'], account['carrot-pull'],
+                   '自动（任务列表里有才做）', account['user-agent'][:40]))
+          print('  logging=%s' % config['logging'])
           PY
 
       - name: Validate config

@@ -41,13 +41,36 @@ python run_local.py --no-cache     # 不读写 .miui_cookie
 ```
 登录成功后 Cookie 会缓存到 `.miui_cookie`（已加入 `.gitignore`，仅本机），下次运行直接复用，不必每天重新登录。
 
-**Cookie 怎么取**：浏览器打开并登录 `https://web.vip.miui.com`，F12 → Network → 任意 `api.vip.miui.com` 请求 → 复制请求头里的 `Cookie` 整行（需含 `serviceToken` 与 `miui_vip_ph`）即可。
+**Cookie 怎么取**（三种方式，任选一种）：
+
+1. **本机已有登录态，最快**：直接打印缓存里的 Cookie，整行复制走
+   ```bash
+   python run_local.py --show-cookie
+   ```
+2. **浏览器手动取**：Chrome/Edge 打开并登录 `https://web.vip.miui.com`，按 F12 → Network → 刷新页面 → 点任意一个 `api.vip.miui.com` 的请求 → 在 Request Headers 里找到 `Cookie:`，**复制冒号后面整行**（不是单条）。
+3. **抓包工具**：Fiddler / Charles 抓手机 App 的 `api.vip.miui.com` 请求，复制 Cookie 请求头。
+
+整行里必须有 `passToken`（微信小程序签到换 `wx_vip_ph` 用）和 `serviceToken`，其余键缺一两个不影响。Cookie 不要换行、不要带引号，粘到 Secret 里必须是一整行。
 
 **云端（GitHub Actions）**：短信验证码无法在 Action 里输入，**推荐配置 `MIUI_COOKIE` Secret**：
 `Settings > Secrets and variables > Actions > New repository secret`，名称 `MIUI_COOKIE`，值粘贴整行 Cookie。
 本机登录成功后可直接 `python run_local.py --show-cookie` 打印缓存里的 Cookie 复制过去。
 配置后 `MIUI_PASSWORD` 可以删掉，`MIUI_UID` 可留空（脚本会从 Cookie 里的 `userId` 读取）。
-Cookie 过期（接口返回 401）时重新取一次并更新 Secret 即可。
+Cookie 过期（接口返回 401）时重新取一次并更新 Secret 即可，大约 1~3 个月一次。
+
+**Actions 变量一览**（Secrets 只放凭据，Variables 放开关注释）：
+
+| 类型 | 名称 | 必填 | 默认 | 说明 |
+| --- | --- | --- | --- | --- |
+| Secret | `MIUI_COOKIE` | ✅ | — | 整行 Cookie，云端唯一稳定登录方式 |
+| Secret | `MIUI_UID` | 可选 | 空 | 用 Cookie 时可留空 |
+| Secret | `MIUI_PASSWORD` | 可选 | 空 | 有 Cookie 时不必配 |
+| Secret | `MIUI_USER_AGENT` | 可选 | 内置 UA | 留空即可 |
+| Variable | `MIUI_CHECK_IN` | 可选 | `true` | 签到默认开；不填也开，填 `false` 关闭 |
+| Variable | `MIUI_LOGGING` | 可选 | `true` | 日志作为 artifact 上传，保留 7 天 |
+| Variable | `MIUI_CARROT_PULL` | 可选 | `false` | 拔萝卜只发金币，成长值模式下会被忽略 |
+
+专题页任务不需要变量：脚本每天先拉任务列表，有「浏览限时专题页」且未完成才执行，没有就一次请求都不发。
 
 
 ### **项目依赖**：
@@ -65,13 +88,13 @@ Cookie 过期（接口返回 401）时重新取一次并更新 Secret 即可。
 
 
 ### **项目介绍**：  
-- [x] 支持 多账号 配置
+- [x] 单账号配置（多账号已移除，一个账号一个 Secret 即可）
 - [x] 支持 Docker 部署
 - [x] 支持 腾讯云函数 部署
 - [x] 自动登录小米账号刷新社区 Cookie 实现自动化   
 - [x] 选择性启用参与小米社区拔萝卜
-- [x] 选择性启用小米社区每日签到（**改走微信小程序通道，成长值+3**，无人机校验；`--check-in` 开启，已签到则零请求）
-- [x] 选择性启用小米社区限时专题任务
+- [x] 小米社区签到（**改走微信小程序通道，成长值+3**，无人机校验；**默认开启**，已签到则零请求）
+- [x] 限时专题任务（无需开关，任务列表里有才做）
 - [x] **任务驱动执行**：先读任务列表，**只处理能获得社区成长值的任务**，且只为「存在且未完成」的发请求  
   - “每日登录小米社区App” 成长值任务
   - “浏览帖子超过10秒” 成长值任务  

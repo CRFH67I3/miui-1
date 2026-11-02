@@ -274,9 +274,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='示例：\n'
                '  python run_local.py --tasks            只拉任务列表并解析哪些能给成长值（只读）\n'
-               '  python run_local.py                    任务驱动执行，只做能给成长值且未完成的任务\n'
+               '  python run_local.py                    任务驱动执行，签到默认开，只做能给成长值的任务\n'
                '  python run_local.py --all-tasks        不成长值过滤，列出全部任务\n'
-               '  python run_local.py --check-in         额外尝试成长值签到（有人机校验，多半失败）\n'
+               '  python run_local.py --no-check-in      关闭签到，只做浏览类任务\n'
                '  python run_local.py --cookie --tasks   用浏览器 Cookie 登录并解析任务\n'
                '  python run_local.py --legacy           回到旧的固定序列\n')
     parser.add_argument('--net', action='store_true', help='不输账号密码，仅检查网络与接口可达性')
@@ -288,10 +288,12 @@ def main():
     parser.add_argument('--all-tasks', action='store_true',
                         help='不做成长值过滤，把任务列表里所有任务都列出来（默认只处理给成长值的）')
     parser.add_argument('--fast', action='store_true', help='压缩随机间隔到 1~2 秒，仅用于调试')
-    parser.add_argument('--check-in', action='store_true', help='启用成长值签到（有风险）')
+    parser.add_argument('--check-in', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--no-check-in', action='store_true',
+                        help='关闭成长值签到（默认是开启的）')
     parser.add_argument('--carrot-pull', action='store_true',
                         help='启用社区拔萝卜（发金币不发成长值，成长值模式下会被忽略；仅 --legacy 生效）')
-    parser.add_argument('--specialpage', action='store_true', help='启用浏览专题页任务（会先查任务状态）')
+    parser.add_argument('--specialpage', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--ua', default='', help='自定义 User-Agent，默认用内置值')
     parser.add_argument('--cookie', action='store_true',
                         help='用已登录的社区 Cookie 登录（跳过账号密码与短信验证）')
@@ -369,8 +371,10 @@ def main():
         mode_text = '常规（任务驱动）'
     w_log('模式：' + mode_text)
     w_log('任务范围：' + ('全部任务（--all-tasks）' if args.all_tasks else '只做能给社区成长值的任务'))
-    w_log('开关：签到=%s 拔萝卜=%s 专题页=%s'
-          % (args.check_in, args.carrot_pull, args.specialpage))
+    # 签到默认开启：签到前会先查状态，已签或状态不明都不发请求，开着不会造成重复签到
+    check_in = not args.no_check_in
+    w_log('开关：签到=%s 拔萝卜=%s 专题页=自动（任务列表里有才做）'
+          % (check_in, args.carrot_pull))
 
     if args.fast:
         enable_fast_mode()
@@ -381,7 +385,7 @@ def main():
     w_log('设备 ID：' + device_id)
 
     task = MIUITask(uid, password, ua, device_id, cookie=cookie)
-    switches = _task_switches(args.check_in, args.carrot_pull, args.specialpage)
+    switches = _task_switches(check_in, args.carrot_pull, args.specialpage)
     growth_only = not args.all_tasks
 
     try:
@@ -389,7 +393,7 @@ def main():
             code = check_only(task, switches, growth_only=growth_only)
         else:
             start(task,
-                  check_in=args.check_in,
+                  check_in=check_in,
                   carrot_pull=args.carrot_pull,
                   browse_specialpage=args.specialpage,
                   legacy=args.legacy,
