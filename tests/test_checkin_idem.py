@@ -4,7 +4,7 @@ import sys
 import unittest
 from unittest import mock
 
-sys.path.insert(0, r'C:\Users\Admin\Desktop\Projects\miui-1')
+sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parents[1]))
 import miuitask as m
 
 

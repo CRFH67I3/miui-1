@@ -19,5 +19,9 @@ accounts:
     # 没有就一次请求都不发。此字段仅为兼容旧配置，已不参与判断
 logging: true
 # 归档日志到本地文件 logs/
+# 钉钉群机器人通知（可选，云端用 Secret 注入更好）
+# dingtalk:
+#   token: 'webhook 里 access_token= 后面那串'
+#   secret: 'SEC 开头的加签密钥；安全设置选「自定义关键词」时删掉这行'
 version: v1.5.2
 # config 文件版本号，debug用

@@ -57,6 +57,7 @@ import utils.utils as utils
 from miuitask import (MIUITask, start, analyze_tasks,
                       print_task_plan, _task_switches)
 from utils.utils import md5_crypto, w_log
+from utils import notify as notifier
 
 # 红米 K70E（2311DRK48C，代号 duchamp）在 Chrome 下的真实 UA。
 # 为什么看不到机型：Chrome 113 起 User-Agent Reduction 已全面生效，
@@ -301,10 +302,28 @@ def main():
     parser.add_argument('--no-cache', action='store_true', help='不读写本地 Cookie 缓存 .miui_cookie')
     parser.add_argument('--show-cookie', action='store_true',
                         help='打印缓存的 Cookie，便于填到 Actions 的 MIUI_COOKIE')
+    parser.add_argument('--notify-test', action='store_true',
+                        help='发一条钉钉测试消息，验证 DINGTALK_TOKEN / DINGTALK_SECRET 是否正确')
     args = parser.parse_args()
 
     if args.net:
         return net_check()
+
+    if args.notify_test:
+        token, secret = notifier.dingtalk_credentials()
+        print('钉钉 token：' + ('已配置' if token else '未配置（DINGTALK_TOKEN）'))
+        print('加签密钥：' + ('已配置' if secret else '未配置（安全设置用关键词/白名单时可留空）'))
+        sample = [{
+            'uid': '测试账号', 'ok': True, 'error': '',
+            'base': 37, 'final': 40,
+            'executed': ['微信小程序签到（测试消息）'],
+            'manual': ['每日签到（测试消息）'],
+            'failed': [], 'skipped': 3,
+            'note': '收到这条消息说明钉钉通知配置正确',
+        }]
+        ok = notifier.notify_run_result(sample, time.time())
+        print('[结果] ' + ('发送成功，去钉钉群看看' if ok else '发送失败，检查上面的错误码'))
+        return 0 if ok else 1
 
     if args.show_cookie:
         value = load_cached_cookie()
@@ -388,6 +407,8 @@ def main():
     switches = _task_switches(check_in, args.carrot_pull, args.specialpage)
     growth_only = not args.all_tasks
 
+    # 只读模式（--check / --tasks）不发通知，免得调试时刷屏
+    started_at = time.time()
     try:
         if args.check or args.tasks:
             code = check_only(task, switches, growth_only=growth_only)
@@ -403,6 +424,11 @@ def main():
         # 登录成功后缓存 Cookie，下次免登录、少一次短信验证
         if task.cookie and not args.no_cache:
             save_cached_cookie(task.cookie)
+        if not (args.check or args.tasks):
+            try:
+                notifier.notify_run_result(miuitask.RUN_REPORT, started_at)
+            except Exception as e:
+                w_log('发送钉钉通知出错：%s: %s' % (type(e).__name__, e))
         # 归档日志便于回看；logs/ 已在 .gitignore 中
         utils.s_log(True)
 

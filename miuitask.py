@@ -12,6 +12,7 @@ from http import cookiejar
 
 from utils.utils import system_info, get_config, w_log, s_log, check_config, format_config, random_sleep, \
     sleep_ten_sec_more, build_device_headers, DEVICE_PROFILE
+from utils import notify as notifier
 
 # 社区成长值任务列表接口
 TASK_LIST_URL = 'https://api.vip.miui.com/mtop/planet/vip/member/getCheckinPageCakeList'
@@ -1454,6 +1455,29 @@ def _task_switches(check_in, carrot_pull, browse_specialpage=False):
     }
 
 
+# ==================== 运行结果汇总（供钉钉通知使用）====================
+# 每个账号跑完往 RUN_REPORT 里放一条，main() 结束前统一组装成一条消息发出去。
+# 只记结论不记明细，避免把 Cookie、请求体这类东西带到外部服务上。
+RUN_REPORT = []
+
+
+def _report_start(miui_task):
+    entry = {
+        'uid': str(getattr(miui_task, 'uid', '') or ''),
+        'ok': False,
+        'error': '',
+        'base': None,
+        'final': None,
+        'executed': [],
+        'manual': [],
+        'failed': [],
+        'skipped': 0,
+        'note': '',
+    }
+    RUN_REPORT.append(entry)
+    return entry
+
+
 def start(miui_task: MIUITask, check_in: bool, carrot_pull: bool, browse_specialpage: bool,
           legacy: bool = False, growth_only: bool = True):
     """
@@ -1470,8 +1494,10 @@ def start(miui_task: MIUITask, check_in: bool, carrot_pull: bool, browse_special
     平时没有这条任务就一次请求都不发。
     """
     # 启动前抖动：避免定时任务在整点秒级固定发起登录
+    entry = _report_start(miui_task)
     random_sleep()
     if not miui_task.mi_login():
+        entry['error'] = '登录失败（Cookie 可能已过期，或账号需要短信验证）'
         return
 
     random_sleep()
@@ -1480,6 +1506,8 @@ def start(miui_task: MIUITask, check_in: bool, carrot_pull: bool, browse_special
     if legacy:
         w_log('已启用 legacy 模式：按固定序列执行，不参考任务列表')
         _start_legacy(miui_task, check_in, carrot_pull, browse_specialpage)
+        entry['ok'] = True
+        entry['note'] = 'legacy 模式（固定序列，不参考任务列表）'
         return
 
     switches = _task_switches(check_in, carrot_pull, browse_specialpage)
@@ -1490,6 +1518,7 @@ def start(miui_task: MIUITask, check_in: bool, carrot_pull: bool, browse_special
 
     w_log('---------- 当前成长值 ----------')
     base_point = miui_task.get_point()
+    entry['base'] = base_point if isinstance(base_point, int) else None
 
     w_log('---------- 查询任务列表 ----------')
     tasks = miui_task.check_daily_tasks()
@@ -1497,13 +1526,18 @@ def start(miui_task: MIUITask, check_in: bool, carrot_pull: bool, browse_special
         # fail-closed：看不到任务状态就不发动作请求，宁可少做也不凭空发请求
         w_log('无法获取任务列表，为避免在看不到任务状态的情况下凭空发请求，本次不执行任何动作')
         w_log('排查建议：先跑 python run_local.py --tasks')
+        entry['error'] = '任务列表获取失败，为避免盲发请求，本次未执行任何动作'
         return
 
     plan, skipped = analyze_tasks(tasks, switches, growth_only=growth_only)
     print_task_plan(plan, skipped)
+    entry['skipped'] = len(skipped)
+    entry['manual'] = [i['title'] for i in plan if i['status'] in ('manual', 'unknown')]
     if carrot_pull and any('拔萝卜' in i['title'] for i in skipped):
         w_log('提示：拔萝卜发放的是金币而非成长值，已按「只做成长值任务」的设定忽略')
     executed = run_task_plan(miui_task, plan)
+    entry['executed'] = [i['title'] for i in plan if i['status'] == 'executed']
+    entry['failed'] = [i['title'] for i in plan if i['status'] == 'failed']
     if executed:
         verify_task_plan(miui_task, plan)
     else:
@@ -1513,10 +1547,12 @@ def start(miui_task: MIUITask, check_in: bool, carrot_pull: bool, browse_special
     random_sleep()
     w_log('---------- 本次成长值变化 ----------')
     end_point = miui_task.get_point()
+    entry['final'] = end_point if isinstance(end_point, int) else None
     if isinstance(base_point, int) and isinstance(end_point, int):
         delta = end_point - base_point
         w_log('成长值 %d -> %d（%s%d）' % (base_point, end_point,
                                           '+' if delta >= 0 else '', delta))
+    entry['ok'] = not entry['failed']
 
 
 def _start_legacy(miui_task: MIUITask, check_in: bool, carrot_pull: bool, browse_specialpage: bool):
@@ -1596,15 +1632,31 @@ def main():
     else:
         config = format_config(config)
 
-    for i in config.get('accounts'):
-        w_log('---------- EXECUTING -------------')
-        start(
-            MIUITask(i.get('uid'), i.get('password'), i.get('user-agent'),
-                     device_id=i.get('device-id'), cookie=i.get('cookie')),
-            i.get('check-in'), i.get('carrot-pull'), i.get('browse-specialpage'),
-        )
-        time.sleep(5)
-    s_log(config.get('logging'))
+    started_at = time.time()
+    try:
+        for i in config.get('accounts'):
+            w_log('---------- EXECUTING -------------')
+            start(
+                MIUITask(i.get('uid'), i.get('password'), i.get('user-agent'),
+                         device_id=i.get('device-id'), cookie=i.get('cookie')),
+                i.get('check-in'), i.get('carrot-pull'), i.get('browse-specialpage'),
+            )
+            time.sleep(5)
+    except Exception as e:
+        # 通知要能反映异常退出，所以先记一条再交给 finally 发送
+        process_exception(e)
+        w_log('运行出现未捕获异常：%s: %s' % (type(e).__name__, e))
+        RUN_REPORT.append({'uid': '', 'ok': False,
+                           'error': '异常退出：%s: %s' % (type(e).__name__, e),
+                           'executed': [], 'manual': [], 'failed': [],
+                           'base': None, 'final': None, 'skipped': 0, 'note': ''})
+    finally:
+        # 通知失败不改变退出码，也不影响日志归档
+        try:
+            notifier.notify_run_result(RUN_REPORT, started_at)
+        except Exception as e:
+            w_log('发送钉钉通知出错：%s: %s' % (type(e).__name__, e))
+        s_log(config.get('logging'))
 
 
 def main_handler(event, context):

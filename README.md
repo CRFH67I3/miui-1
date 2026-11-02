@@ -66,11 +66,45 @@ Cookie 过期（接口返回 401）时重新取一次并更新 Secret 即可，�
 | Secret | `MIUI_UID` | 可选 | 空 | 用 Cookie 时可留空 |
 | Secret | `MIUI_PASSWORD` | 可选 | 空 | 有 Cookie 时不必配 |
 | Secret | `MIUI_USER_AGENT` | 可选 | 内置 UA | 留空即可 |
+| Secret | `DINGTALK_TOKEN` | 可选 | 空 | 钉钉机器人 webhook 的 `access_token`，配了才发通知 |
+| Secret | `DINGTALK_SECRET` | 可选 | 空 | 机器人安全设置选「加签」时的密钥；选关键词则留空 |
 | Variable | `MIUI_CHECK_IN` | 可选 | `true` | 签到默认开；不填也开，填 `false` 关闭 |
 | Variable | `MIUI_LOGGING` | 可选 | `true` | 日志作为 artifact 上传，保留 7 天 |
 | Variable | `MIUI_CARROT_PULL` | 可选 | `false` | 拔萝卜只发金币，成长值模式下会被忽略 |
 
 专题页任务不需要变量：脚本每天先拉任务列表，有「浏览限时专题页」且未完成才执行，没有就一次请求都不发。
+
+
+### **钉钉通知（可选）**：
+
+配了机器人就推一条结果摘要，没配就静默跳过，任务照常执行。
+
+**机器人怎么建**：钉钉群 → 右上角设置 → 智能群助手 → 添加机器人 → 自定义（通过 Webhook 接入）→ 安全设置勾 **加签**，复制两样东西：
+
+- `Webhook` 里的 `access_token=xxxx` 那串 → 填 `DINGTALK_TOKEN`
+- 加签密钥 `SECxxxx` → 填 `DINGTALK_SECRET`
+
+安全设置如果选的是「自定义关键词」，`DINGTALK_SECRET` 留空即可，但关键词要能命中消息内容（消息标题固定含「小米社区」，建议把关键词设成 **小米社区**）。
+
+**本机验证**（不跑任务，直接发一条测试消息）：
+
+```bash
+# Windows PowerShell
+$env:DINGTALK_TOKEN="你的token"; $env:DINGTALK_SECRET="SEC你的密钥"; python run_local.py --notify-test
+# macOS / Linux
+DINGTALK_TOKEN=xxx DINGTALK_SECRET=SECxxx python run_local.py --notify-test
+```
+
+收到「小米社区任务结果」消息就说明配置对了。也可以把 `DINGTALK_TOKEN` / `DINGTALK_SECRET` 写进 `config.yaml` 顶层，本机不用每次设环境变量：
+
+```yaml
+dingtalk:
+  token: xxxxx
+  secret: SECxxxxx
+```
+
+**推送内容**：账号、成长值变化（如 `37 → 40（+3）`）、已执行的动作、需人工的任务、执行出错项、被忽略的非成长值任务数、耗时。只记结论，不带 Cookie、请求体之类的敏感信息。
+通知失败不影响任务退出码：token 错、加签不对只会让这次没消息，脚本仍按原结果结束。
 
 
 ### **项目依赖**：

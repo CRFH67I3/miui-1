@@ -12,6 +12,11 @@ name: MIUI Task
 #   MIUI_PASSWORD       可选      小米账户密码明文，脚本会自动转大写 MD5（有 Cookie 时不建议配）
 #   MIUI_USER_AGENT     可选      登录社区所用 UA，留空用内置默认值
 #
+#   DINGTALK_TOKEN      可选      钉钉群机器人 webhook 里的 access_token
+#                                 （https://oapi.dingtalk.com/robot/send?access_token=xxx 中的 xxx）
+#   DINGTALK_SECRET     可选      机器人「安全设置」选加签时的密钥；选关键词则留空
+#                                 配了这两个，任务结束会往群里推一条结果摘要
+#
 # 需要配置的 Repository variables（同一页面的 Variables 标签，不填也有默认值）：
 #   MIUI_CHECK_IN   默认 true   成长值签到（含微信小程序签到）。签到前会先查状态，
 #                               已签到或状态不明确时一个请求都不发，开着不会重复签到
@@ -153,6 +158,10 @@ jobs:
           PY
 
       - name: Run MIUI Task
+        env:
+          # 钉钉群自定义机器人：不配就不发通知，任务照常执行
+          DINGTALK_TOKEN: ${{ secrets.DINGTALK_TOKEN }}
+          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
         run: python miuitask.py
 
       - name: Upload logs
