@@ -103,8 +103,12 @@ HUMAN_CHECK_CODE = 640
 # 已知需要补充说明的动作（不是不能做，而是要走特殊通道 / 有前置条件）
 TASK_ACTION_NOTES = {
     'wechat_checkin': '走微信小程序通道，无人机校验；已签到则一次请求都不发',
-    'check_in': 'App 内 checkinV2 有人机校验（640），脚本通常做不了，需要手动点一次',
+    'check_in': 'App 内 checkinV2 有人机校验（640），脚本发请求必被拦，需要在 App 里手动点一次（+1~+2）',
     'browse_specialpage': '活动期间任务列表里出现才做，没有这条任务时不发请求',
+}
+# 需人工的任务在通知里补一句「怎么做、值多少」，否则收到消息只知道名字不知道该干嘛
+TASK_ACTION_MANUAL_HINT = {
+    'check_in': '在小米社区 App 里手动点一次签到，可再拿 +1~+2',
 }
 # 这些动作即使开着开关也不自动执行：做了也是白发请求，只会多留一份脚本痕迹
 TASK_ACTION_MANUAL_ONLY = frozenset({'check_in'})
@@ -1532,7 +1536,13 @@ def start(miui_task: MIUITask, check_in: bool, carrot_pull: bool, browse_special
     plan, skipped = analyze_tasks(tasks, switches, growth_only=growth_only)
     print_task_plan(plan, skipped)
     entry['skipped'] = len(skipped)
-    entry['manual'] = [i['title'] for i in plan if i['status'] in ('manual', 'unknown')]
+    entry['manual'] = []
+    for item in plan:
+        if item['status'] not in ('manual', 'unknown'):
+            continue
+        hint = TASK_ACTION_MANUAL_HINT.get(item.get('action') or '')
+        # 通知里带上操作方式，否则「需人工：每日签到」看不出该干什么
+        entry['manual'].append('%s（%s）' % (item['title'], hint) if hint else item['title'])
     if carrot_pull and any('拔萝卜' in i['title'] for i in skipped):
         w_log('提示：拔萝卜发放的是金币而非成长值，已按「只做成长值任务」的设定忽略')
     executed = run_task_plan(miui_task, plan)

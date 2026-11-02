@@ -65,6 +65,26 @@ class TestFormatReport(unittest.TestCase):
         self.assertIn('执行出错', text)
         self.assertIn('未完成', text)
 
+    def test_manual_hint_shown(self):
+        """需人工项要带上怎么做、值多少，光给个任务名没法操作"""
+        text = notify.format_report([{
+            'uid': 'u', 'ok': True, 'error': '', 'base': 37, 'final': 40,
+            'executed': [], 'failed': [], 'skipped': 0, 'note': '',
+            'manual': ['每日签到（在小米社区 App 里手动点一次签到，可再拿 +1~+2）'],
+        }], None)
+        self.assertIn('需人工', text)
+        self.assertIn('手动点一次签到', text)
+        self.assertIn('+1~+2', text)
+
+    def test_manual_multiple_joined_by_semicolon(self):
+        """多项需人工用分号连接：括号内本身有逗号，用顿号会读不清"""
+        text = notify.format_report([{
+            'uid': 'u', 'ok': True, 'error': '', 'base': 37, 'final': 40,
+            'executed': [], 'failed': [], 'skipped': 0, 'note': '',
+            'manual': ['每日签到（App 内点一次）', '完善资料（需本人填写）'],
+        }], None)
+        self.assertIn('每日签到（App 内点一次）；完善资料（需本人填写）', text)
+
 
 class TestSignedUrl(unittest.TestCase):
     def test_without_secret(self):

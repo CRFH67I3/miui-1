@@ -137,7 +137,8 @@ def format_report(entries, started_at=None):
 
         manual = entry.get('manual') or []
         if manual:
-            lines.append(_line('需人工', '、'.join(manual)))
+            # 多项之间用分号，避免括号里的逗号跟顿号混在一起读不清
+            lines.append(_line('需人工', '；'.join(manual)))
 
         failed = entry.get('failed') or []
         if failed:
