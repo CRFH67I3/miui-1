@@ -1,1 +1,22 @@
 __pycache__
+*.pyc
+logs/
+# 本机登录成功后缓存的社区 Cookie，绝对不能提交
+.miui_cookie
+# 逆向分析用的 APK 与解包产物，不要提交
+_apk/
+_apk_work/
+# 微信小程序包解密产物，不要提交
+_wx/
+.tmp/
+
+# APK 安装包体积大，且与本项目运行无关
+*.apk
+*.apk.zip
+
+# 本地环境与工具产物
+.venv/
+venv/
+.idea/workspace.xml
+.DS_Store
+.workbuddy/

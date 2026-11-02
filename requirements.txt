@@ -1,3 +1,7 @@
 requests>=2.25.1
 python-dotenv>=0.19.2
 PyYAML>=6.0
+# 以下两项让 Accept-Encoding 与真实 Chrome 对齐（gzip, deflate, br, zstd）
+# 未安装时脚本会自动降级为 gzip, deflate，不影响运行
+brotli>=1.1.0
+zstandard>=0.22.0
