@@ -7,9 +7,11 @@ name: MIUI Task
 #
 # 需要配置的 Repository secrets（Settings > Secrets and variables > Actions）：
 #   MIUI_COOKIE         唯一必填  已登录的社区 Cookie。云端收不到短信，账号一旦被要求短信验证
-#                                就只能靠它；配置后不再需要 MIUI_UID / MIUI_PASSWORD
-#   MIUI_UID            可选      小米账户 ID（纯数字）。用 Cookie 登录时留空即可
-#   MIUI_PASSWORD       可选      小米账户密码明文，脚本会自动转大写 MD5（有 Cookie 时不建议配）
+#                                就只能靠它。配了它之后 MIUI_UID / MIUI_PASSWORD 完全不参与登录
+#   MIUI_UID            可选      小米账户 ID（纯数字）。用 Cookie 登录时留空即可；
+#                                若不是纯数字，有 Cookie 时降级为警告并忽略，没有 Cookie 时直接报错
+#   MIUI_PASSWORD       可选      小米账户密码明文，脚本会自动转大写 MD5。
+#                                有 Cookie 时不会用到（脚本不会拿它兜底），可以删掉
 #   MIUI_USER_AGENT     可选      登录社区所用 UA，留空用内置默认值
 #
 #   DINGTALK_TOKEN      可选      钉钉群机器人 webhook 里的 access_token
@@ -100,11 +102,36 @@ jobs:
                     .strip().replace('\r', '').replace('\n', ''))
           ua = str(os.environ.get('MIUI_USER_AGENT', '') or '').strip()
 
+          def cookie_value(cookie, key):
+              # 极简 Cookie 取值，避免为了一个字段引入 http.cookies 的复杂度
+              for part in cookie.split(';'):
+                  part = part.strip()
+                  if part.startswith(key + '='):
+                      return part[len(key) + 1:].strip()
+              return ''
+
+
           if not cookie and (not uid or not password):
               fail('缺少登录凭据：请配置 MIUI_COOKIE（推荐，免短信验证），'
                    '或同时配置 MIUI_UID 和 MIUI_PASSWORD')
           if uid and not uid.isdigit():
-              fail('MIUI_UID 必须是纯数字的小米账户 ID，当前值不是纯数字')
+              # 有 Cookie 时 uid 只是冗余信息（Cookie 里自带 userId），
+              # 填了邮箱/昵称也不该让整次运行失败，降级为警告并忽略
+              if cookie:
+                  print('::warning::MIUI_UID 不是纯数字，已忽略；'
+                        '将使用 Cookie 里的 userId')
+                  uid = ''
+              else:
+                  fail('MIUI_UID 必须是纯数字的小米账户 ID，当前值不是纯数字')
+          if cookie:
+              # 以 Cookie 里的 userId 为准：device-id 是按 uid 派生的，
+              # uid 用错会让设备指纹漂移。手机号也是纯数字，上面拦不住，必须在这里纠正
+              cookie_uid = cookie_value(cookie, 'userId')
+              if cookie_uid.isdigit():
+                  if uid and uid != cookie_uid:
+                      print('::warning::MIUI_UID (%s) 与 Cookie 里的 userId (%s) 不一致，'
+                            '以 Cookie 为准' % (uid, cookie_uid))
+                  uid = cookie_uid
 
           for secret in (password, cookie):
               if secret:

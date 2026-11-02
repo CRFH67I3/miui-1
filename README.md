@@ -63,14 +63,16 @@ Cookie 过期（接口返回 401）时重新取一次并更新 Secret 即可，�
 | 类型 | 名称 | 必填 | 默认 | 说明 |
 | --- | --- | --- | --- | --- |
 | Secret | `MIUI_COOKIE` | ✅ | — | 整行 Cookie，云端唯一稳定登录方式 |
-| Secret | `MIUI_UID` | 可选 | 空 | 用 Cookie 时可留空 |
-| Secret | `MIUI_PASSWORD` | 可选 | 空 | 有 Cookie 时不必配 |
+| Secret | `MIUI_UID` | 可选 | 空 | 有 Cookie 时不参与登录，会被 Cookie 里的 `userId` 覆盖；填错也只告警 |
+| Secret | `MIUI_PASSWORD` | 可选 | 空 | 有 Cookie 时脚本不会拿它兜底，可以删掉 |
 | Secret | `MIUI_USER_AGENT` | 可选 | 内置 UA | 留空即可 |
 | Secret | `DINGTALK_TOKEN` | 可选 | 空 | 钉钉机器人 webhook 的 `access_token`，配了才发通知 |
 | Secret | `DINGTALK_SECRET` | 可选 | 空 | 机器人安全设置选「加签」时的密钥；选关键词则留空 |
 | Variable | `MIUI_CHECK_IN` | 可选 | `true` | 签到默认开；不填也开，填 `false` 关闭 |
 | Variable | `MIUI_LOGGING` | 可选 | `true` | 日志作为 artifact 上传，保留 7 天 |
 | Variable | `MIUI_CARROT_PULL` | 可选 | `false` | 拔萝卜只发金币，成长值模式下会被忽略 |
+
+Secrets 和 Variables 是两个标签页，别把 `MIUI_CHECK_IN` 建成 Secret——workflow 从 `vars` 读，建在 Secrets 里不生效。
 
 专题页任务不需要变量：脚本每天先拉任务列表，有「浏览限时专题页」且未完成才执行，没有就一次请求都不发。
 
@@ -105,6 +107,28 @@ dingtalk:
 
 **推送内容**：账号、成长值变化（如 `37 → 40（+3）`）、已执行的动作、需人工的任务、执行出错项、被忽略的非成长值任务数、耗时。只记结论，不带 Cookie、请求体之类的敏感信息。
 通知失败不影响任务退出码：token 错、加签不对只会让这次没消息，脚本仍按原结果结束。
+
+
+### **在 Actions 里运行**：
+
+配置完 Secret 后不需要额外操作，工作流有两种触发方式：
+
+| 方式 | 怎么触发 | 说明 |
+| --- | --- | --- |
+| 定时 | 无需操作 | `0 20 * * *`（UTC）= **北京时间每天 04:00**。GitHub 的 cron 不保证准点，常见延迟几分钟到半小时 |
+| 手动 | Actions → `MIUI Task` → `Run workflow` → 选 `master` → 绿色按钮 | 随时可点，不受定时影响 |
+
+一次运行大约 3~8 分钟。结束后：
+
+- 想看待办明细 → 点进这次运行，展开 `Run MIUI Task` 步骤看实时日志
+- 想看完整日志 → 页面底部 `Artifacts` 下载 `miui-logs`（保留 7 天）
+- 想看结果摘要 → 群里收到的钉钉消息
+
+两个容易忽略的点：
+
+**签到是幂等的**，同一小时内手动点几次也不会重复签到——脚本先查签到页，已签就一个请求都不发。所以「今天已经跑过了」不是问题，重复触发只是白跑一遍。
+
+**定时任务会被自动停用**：仓库连续 60 天没有任何提交时，GitHub 会停掉 schedule。收到 `This scheduled workflow is disabled` 邮件或发现日志断更，去 Actions 页点一下 `Enable workflow` 即可。
 
 
 ### **项目依赖**：
