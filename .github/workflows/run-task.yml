@@ -1,0 +1,201 @@
+name: MIUI Task
+
+# 说明：
+# 1. 本 workflow 才会真正执行 miuitask.py（原仓库的 docker-image.yml 只构建镜像）
+# 2. 账号密码全部通过 Secret / Variable 注入，运行时生成 config.yaml，明文不进入仓库
+# 3. cron 使用 UTC 时间，0 19 * * * = 北京时间次日 03:00（UTC+8）
+#
+# 需要配置的 Repository secrets（Settings > Secrets and variables > Actions）：
+#   MIUI_COOKIE         唯一必填  已登录的社区 Cookie。云端收不到短信，账号一旦被要求短信验证
+#                                就只能靠它。配了它之后 MIUI_UID / MIUI_PASSWORD 完全不参与登录
+#   MIUI_UID            可选      小米账户 ID（纯数字）。用 Cookie 登录时留空即可；
+#                                若不是纯数字，有 Cookie 时降级为警告并忽略，没有 Cookie 时直接报错
+#   MIUI_PASSWORD       可选      小米账户密码明文，脚本会自动转大写 MD5。
+#                                有 Cookie 时不会用到（脚本不会拿它兜底），可以删掉
+#   MIUI_USER_AGENT     可选      登录社区所用 UA，留空用内置默认值
+#
+#   DINGTALK_TOKEN      可选      钉钉群机器人 webhook 里的 access_token
+#                                 （https://oapi.dingtalk.com/robot/send?access_token=xxx 中的 xxx）
+#   DINGTALK_SECRET     可选      机器人「安全设置」选加签时的密钥；选关键词则留空
+#                                 配了这两个，任务结束会往群里推一条结果摘要
+#
+# 需要配置的 Repository variables（同一页面的 Variables 标签，不填也有默认值）：
+#   MIUI_CHECK_IN   默认 true   成长值签到（含微信小程序签到）。签到前会先查状态，
+#                               已签到或状态不明确时一个请求都不发，开着不会重复签到
+#   MIUI_LOGGING    默认 true   归档日志到 logs/ 并作为 artifact 上传
+#   MIUI_CARROT_PULL 默认 false  社区拔萝卜（只发金币不发成长值，成长值模式下会被忽略）
+#
+# 专题页任务（浏览限时专题页）不需要开关：脚本每天先拉任务列表，
+# 列表里有这条且未完成才执行，没有就一次请求都不发。
+
+on:
+  schedule:
+    - cron: '0 19 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: miui-task
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    # 单账号约 5~10 分钟（15 个动作各前置 20~40 秒随机等待）；多账号线性叠加，留足余量
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate config.yaml from secrets
+        env:
+          MIUI_UID: ${{ secrets.MIUI_UID }}
+          MIUI_PASSWORD: ${{ secrets.MIUI_PASSWORD }}
+          MIUI_COOKIE: ${{ secrets.MIUI_COOKIE }}
+          MIUI_USER_AGENT: ${{ secrets.MIUI_USER_AGENT }}
+          MIUI_CHECK_IN: ${{ vars.MIUI_CHECK_IN }}
+          MIUI_CARROT_PULL: ${{ vars.MIUI_CARROT_PULL }}
+          MIUI_LOGGING: ${{ vars.MIUI_LOGGING }}
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+
+          import yaml
+
+          # 红米 K70E（2311DRK48C）在 Chrome 下的真实 UA。Chrome 113 起 UA
+          # 缩减全面生效，Android 版本冻结为 10、机型替换为字母 K，故不含机型。
+          DEFAULT_UA = ('Mozilla/5.0 (Linux; Android 10; K) '
+                        'AppleWebKit/537.36 (KHTML, like Gecko) '
+                        'Chrome/150.0.0.0 Mobile Safari/537.36')
+
+
+          def fail(msg):
+              print('::error::' + msg)
+              sys.exit(1)
+
+
+          def truthy(name, default=False):
+              raw = os.environ.get(name, '')
+              if raw is None or str(raw).strip() == '':
+                  return default
+              return str(raw).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+
+
+          uid = str(os.environ.get('MIUI_UID', '') or '').strip()
+          password = str(os.environ.get('MIUI_PASSWORD', '') or '').strip()
+          cookie = (str(os.environ.get('MIUI_COOKIE', '') or '')
+                    .strip().replace('\r', '').replace('\n', ''))
+          ua = str(os.environ.get('MIUI_USER_AGENT', '') or '').strip()
+
+          def cookie_value(cookie, key):
+              # 极简 Cookie 取值，避免为了一个字段引入 http.cookies 的复杂度
+              for part in cookie.split(';'):
+                  part = part.strip()
+                  if part.startswith(key + '='):
+                      return part[len(key) + 1:].strip()
+              return ''
+
+
+          if not cookie and (not uid or not password):
+              fail('缺少登录凭据：请配置 MIUI_COOKIE（推荐，免短信验证），'
+                   '或同时配置 MIUI_UID 和 MIUI_PASSWORD')
+          if uid and not uid.isdigit():
+              # 有 Cookie 时 uid 只是冗余信息（Cookie 里自带 userId），
+              # 填了邮箱/昵称也不该让整次运行失败，降级为警告并忽略
+              if cookie:
+                  print('::warning::MIUI_UID 不是纯数字，已忽略；'
+                        '将使用 Cookie 里的 userId')
+                  uid = ''
+              else:
+                  fail('MIUI_UID 必须是纯数字的小米账户 ID，当前值不是纯数字')
+          if cookie:
+              # 以 Cookie 里的 userId 为准：device-id 是按 uid 派生的，
+              # uid 用错会让设备指纹漂移。手机号也是纯数字，上面拦不住，必须在这里纠正
+              cookie_uid = cookie_value(cookie, 'userId')
+              if cookie_uid.isdigit():
+                  if uid and uid != cookie_uid:
+                      print('::warning::MIUI_UID (%s) 与 Cookie 里的 userId (%s) 不一致，'
+                            '以 Cookie 为准' % (uid, cookie_uid))
+                  uid = cookie_uid
+
+          for secret in (password, cookie):
+              if secret:
+                  print('::add-mask::' + secret)
+
+          account = {
+              'uid': uid,
+              'user-agent': ua or DEFAULT_UA,
+              'carrot-pull': truthy('MIUI_CARROT_PULL'),
+              # 签到默认开启：签到前会先查状态，已签到或状态不明都不发请求
+              'check-in': truthy('MIUI_CHECK_IN', default=True),
+              # 专题页由任务列表门控，这里恒为 false，保留字段只是为了兼容旧配置
+              'browse-specialpage': False,
+          }
+          if cookie:
+              # Cookie 登录：不需要密码，也不会触发短信验证（Actions 里收不到短信）
+              account['cookie'] = cookie
+          else:
+              account['password'] = password
+
+          config = {
+              'accounts': [account],
+              'logging': truthy('MIUI_LOGGING', default=True),
+              'version': 'v1.5.2',
+          }
+
+          with open('config.yaml', 'w', encoding='utf-8') as fp:
+              yaml.safe_dump(config, fp, allow_unicode=True, sort_keys=False)
+
+          print('已生成 config.yaml')
+          print('  uid=%s  登录方式=%s  签到=%s  拔萝卜=%s  专题页=%s  ua=%s'
+                % (uid or '(来自 Cookie)', 'Cookie' if cookie else '账号密码',
+                   account['check-in'], account['carrot-pull'],
+                   '自动（任务列表里有才做）', account['user-agent'][:40]))
+          print('  logging=%s' % config['logging'])
+          PY
+
+      - name: Validate config
+        run: |
+          python - <<'PY'
+          import sys
+
+          from utils.utils import check_config, format_config, get_config
+
+          config = get_config()
+          if not check_config(config):
+              print('::error::生成的 config.yaml 未通过 check_config 校验')
+              sys.exit(1)
+          config = format_config(config)
+          print('配置校验通过，账号数：%d' % len(config['accounts']))
+          PY
+
+      - name: Run MIUI Task
+        env:
+          # 钉钉群自定义机器人：不配就不发通知，任务照常执行
+          DINGTALK_TOKEN: ${{ secrets.DINGTALK_TOKEN }}
+          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
+        run: python miuitask.py
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: miui-logs
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 7

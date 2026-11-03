@@ -1,0 +1,27 @@
+accounts:
+  - uid: 100000
+    # 小米账户ID 非小米账户用户名；用 cookie 登录时可留空
+    password: Abcd.1234
+    # 小米账户密码或其MD5哈希；用 cookie 登录时不生效
+    # 若账号登录时总被要求短信验证，可改用下面的 cookie 方式（配了 cookie 就忽略 uid/password）
+    # cookie: 'cUserId=xxx; passToken=xxx; serviceToken=xxx; miui_vip_ph=xxx'
+    # 浏览器登录 web.vip.miui.com 后复制整行 Cookie；passToken 是微信小程序签到换票的前提
+    user-agent: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Mobile Safari/537.36'
+    # 登录小米社区时所用浏览器的 User-Agent
+    # 可在此工具查看：https://tool.chinaz.com/useragent
+    # device-id: 选填，16 位十六进制设备号；不填会按账号 ID 自动派生一个稳定值
+    carrot-pull: false
+    # 小米社区拔萝卜，只发金币不发成长值，成长值模式下会被忽略
+    check-in: true
+    # 成长值签到，默认开启。签到前会先查状态，已签到或状态不明都不发请求
+    browse-specialpage: false
+    # 浏览限时专题页：不需要开关，脚本每天先拉任务列表，有这条且未完成才执行，
+    # 没有就一次请求都不发。此字段仅为兼容旧配置，已不参与判断
+logging: true
+# 归档日志到本地文件 logs/
+# 钉钉群机器人通知（可选，云端用 Secret 注入更好）
+# dingtalk:
+#   token: 'webhook 里 access_token= 后面那串'
+#   secret: 'SEC 开头的加签密钥；安全设置选「自定义关键词」时删掉这行'
+version: v1.5.2
+# config 文件版本号，debug用
