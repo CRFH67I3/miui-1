@@ -3,7 +3,9 @@ name: MIUI Task
 # 说明：
 # 1. 本 workflow 才会真正执行 miuitask.py（原仓库的 docker-image.yml 只构建镜像）
 # 2. 账号密码全部通过 Secret / Variable 注入，运行时生成 config.yaml，明文不进入仓库
-# 3. cron 使用 UTC 时间，0 19 * * * = 北京时间次日 03:00（UTC+8）
+# 3. cron 使用 UTC 时间，17 19 * * * = 北京时间次日 03:17（UTC+8）。
+#    故意不取整点：GitHub 官方说明整点是队列最拥堵的时段，排队任务可能被丢弃，
+#    错开 17 分钟能显著降低漏跑概率；实际触发仍可能延迟几分钟到数小时。
 #
 # 需要配置的 Repository secrets（Settings > Secrets and variables > Actions）：
 #   MIUI_COOKIE         唯一必填  已登录的社区 Cookie。云端收不到短信，账号一旦被要求短信验证
@@ -30,7 +32,7 @@ name: MIUI Task
 
 on:
   schedule:
-    - cron: '0 19 * * *'
+    - cron: '17 19 * * *'
   workflow_dispatch:
 
 permissions:
