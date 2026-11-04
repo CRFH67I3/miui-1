@@ -1422,8 +1422,11 @@ def run_task_plan(miui_task, plan):
             item['status'] = 'unknown'
             continue
         try:
-            action()
-            item['status'] = 'executed'
+            result = action()
+            # 动作显式返回 False = 没做成（小程序通道不可用、签到状态不确定等），
+            # 不能记成 executed，否则复查时会变成「签到已完成、只是状态同步延迟」，
+            # 把真失败说成成功。返回 None 的动作（只发请求不判结果）仍按 executed 处理。
+            item['status'] = 'failed' if result is False else 'executed'
         except Exception as e:
             w_log('执行出错：' + item['title'])
             w_log(e)
@@ -1468,6 +1471,8 @@ def verify_task_plan(miui_task, plan):
                 reason = '签到已完成、成长值已到账；任务列表完成状态同步有延迟，属正常'
             elif item.get('status') == 'executed':
                 reason = '动作已执行，但任务列表仍显示未完成（成长值到账与任务状态不同步）'
+            elif item.get('status') == 'failed':
+                reason = '动作执行未成功，具体原因见上方日志'
             else:
                 reason = item.get('reason', '')
             w_log('  仍未完成：' + t + ('（' + reason + '）' if reason else ''))
