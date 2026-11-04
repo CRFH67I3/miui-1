@@ -384,10 +384,27 @@ class MIUITask:
             handler = request.HTTPCookieProcessor(r_cookie)
             opener = request.build_opener(handler)
             response = opener.open(url)
+            jars = {}
             for item in r_cookie:
-                self.cookie += item.name + '=' + item.value + ';'
-            if self.cookie == '':
+                jars[item.name] = item.value
+            # account.xiaomi.com 登录时下发的 passToken / userId 只存在于 self.session，
+            # 上面这个 opener 是独立的 cookie 罐，取不到它们；而小程序签到换票
+            # （wechat_login）必须要 passToken。这里把 session 里的小米域 cookie 合并进来，
+            # 同名以跳转拿到的结果为准。
+            if self.session is not None:
+                for item in self.session.cookies:
+                    if 'miui.com' in item.domain or 'xiaomi.com' in item.domain:
+                        jars.setdefault(item.name, item.value)
+            if not jars:
                 return False
+            # 保序合并：已收集的 self.cookie 在前，新拿到的覆盖同名项
+            merged = {}
+            for part in self.cookie.split(';'):
+                if '=' in part:
+                    key, value = part.split('=', 1)
+                    merged[key.strip()] = value.strip()
+            merged.update(jars)
+            self.cookie = '; '.join('%s=%s' % (k, v) for k, v in merged.items()) + ';'
             ck_list = self.cookie.replace(" ", "").split(';')
             for ph in ck_list:
                 if "miui_vip_ph=" in ph:
@@ -860,6 +877,19 @@ class MIUITask:
             headers=self._account_headers(), timeout=25)
         return self._loads_account_json(response)
 
+    def _warn_missing_cookie_items(self):
+        """
+        登录收尾后检查关键字段。
+
+        小程序签到（每天 +3，成长值里最大的一笔）靠 passToken 换票、靠 userId 标识账号；
+        少了它们社区任务照常跑，但小程序那条会静默跳过，所以必须在登录时就提醒。
+        """
+        missing = [name for name in ('passToken', 'userId', 'miui_vip_ph')
+                   if not self._cookie_item(name)]
+        if missing:
+            w_log('注意：登录结果缺少 %s；小程序签到需要 passToken + userId，缺了会跳过'
+                  % '、'.join(missing))
+
     def _ask_sms_code(self, label):
         if self.sms_code_provider:
             return str(self.sms_code_provider(label) or '').strip()
@@ -890,6 +920,7 @@ class MIUITask:
         self.miui_vip_ph = jars.get('miui_vip_ph', '')
         if not self.miui_vip_ph and not self.get_vip_cookie(url):
             w_log('警告：没有取到 miui_vip_ph，成长值相关任务可能失败')
+        self._warn_missing_cookie_items()
         w_log('账号登录完成（二次验证通过）')
         return True
 
@@ -1037,6 +1068,7 @@ class MIUITask:
             if not self.get_vip_cookie(r_json['location']):
                 w_log('小米账号登录成功，社区获取 Cookie 失败')
                 return False
+            self._warn_missing_cookie_items()
             w_log('账号登录完成')
             return True
         except Exception as e:
