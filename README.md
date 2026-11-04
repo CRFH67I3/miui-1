@@ -41,6 +41,17 @@ python run_local.py --no-cache     # 不读写 .miui_cookie
 ```
 登录成功后 Cookie 会缓存到 `.miui_cookie`（已加入 `.gitignore`，仅本机），下次运行直接复用，不必每天重新登录。
 
+**Cookie 失效了怎么办**（Actions 里报「Cookie 已失效或不完整（接口返回 401）」）：
+
+```bash
+python run_local.py --login --check   # 账密 + 短信验证码重新登录，只登录不跑任务
+python run_local.py --show-cookie     # 打印完整 Cookie 字符串
+```
+
+把打印出的 Cookie 覆盖到仓库 Secret `MIUI_COOKIE` 即可（Settings → Secrets and variables → Actions）。
+注意：Actions 用的是海外 IP，与本机交替使用同一个 `passToken` 容易触发风控而提前失效；
+若频繁掉登录，可只用 Actions、本机调试时加 `--no-cache`（不覆盖 `.miui_cookie`）。
+
 **Cookie 怎么取**（三种方式，任选一种）：
 
 1. **本机已有登录态，最快**：直接打印缓存里的 Cookie，整行复制走
