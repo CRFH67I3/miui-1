@@ -34,6 +34,14 @@ on:
   schedule:
     - cron: '17 19 * * *'
   workflow_dispatch:
+    inputs:
+      login_mode:
+        description: '登录方式：cookie 用 Secret MIUI_COOKIE；password 忽略 Cookie 走账号密码'
+        type: choice
+        options:
+          - cookie
+          - password
+        default: cookie
 
 permissions:
   contents: read
@@ -72,6 +80,7 @@ jobs:
           MIUI_CHECK_IN: ${{ vars.MIUI_CHECK_IN }}
           MIUI_CARROT_PULL: ${{ vars.MIUI_CARROT_PULL }}
           MIUI_LOGGING: ${{ vars.MIUI_LOGGING }}
+          LOGIN_MODE: ${{ inputs.login_mode || 'cookie' }}
         run: |
           python - <<'PY'
           import os
@@ -103,6 +112,17 @@ jobs:
           cookie = (str(os.environ.get('MIUI_COOKIE', '') or '')
                     .strip().replace('\r', '').replace('\n', ''))
           ua = str(os.environ.get('MIUI_USER_AGENT', '') or '').strip()
+
+          # 手动运行时可选 login_mode=password，强制走账号密码、忽略已有 Cookie。
+          # 用途：Cookie 过期后先验证账密这条路在 Actions 的网络环境下还能不能走通。
+          login_mode = str(os.environ.get('LOGIN_MODE', '') or 'cookie').strip().lower()
+          if login_mode == 'password':
+              if cookie:
+                  print('::notice::login_mode=password：本次忽略 Secret MIUI_COOKIE，'
+                        '改用 MIUI_UID + MIUI_PASSWORD 登录')
+              cookie = ''
+              if not (uid and password):
+                  fail('login_mode=password 需要同时配置 MIUI_UID 和 MIUI_PASSWORD')
 
           def cookie_value(cookie, key):
               # 极简 Cookie 取值，避免为了一个字段引入 http.cookies 的复杂度
