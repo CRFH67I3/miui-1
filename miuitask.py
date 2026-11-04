@@ -820,7 +820,18 @@ class MIUITask:
         list_url = start_url.replace(IDENTITY_START_PATH, 'identity/list') \
             if IDENTITY_START_PATH in start_url else start_url
         response = self.session.get(list_url, headers=self._account_headers(referer=start_url), timeout=25)
-        meta = self._loads_account_json(response)
+        text = (response.text or '').strip()
+        body = text.lstrip('&')
+        if body.startswith('START'):
+            body = body[len('START'):].lstrip('&')
+        if not body.startswith('{'):
+            # 数据中心 IP（Actions、云主机）常被重定向到登录页或风控页。
+            # 只报一句 JSONDecodeError 看不出卡在哪，这里补上状态码和响应片段
+            w_log('验证入口没有返回 JSON：HTTP %s，Content-Type=%s'
+                  % (response.status_code, response.headers.get('Content-Type', '未知')))
+            w_log('响应片段：' + ' '.join(text[:160].split()))
+            raise ValueError('identity/list 返回非 JSON')
+        meta = json.loads(body)
         if not self.session.cookies.get('identity_session'):
             for item in response.cookies:
                 if item.name == 'identity_session':
