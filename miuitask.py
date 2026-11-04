@@ -1501,7 +1501,8 @@ def start(miui_task: MIUITask, check_in: bool, carrot_pull: bool, browse_special
     entry = _report_start(miui_task)
     random_sleep()
     if not miui_task.mi_login():
-        entry['error'] = '登录失败（Cookie 可能已过期，或账号需要短信验证）'
+        entry['error'] = ('登录失败（Cookie 已过期或账号需要短信验证）'
+                          '→ 本机 python run_local.py --login 重新获取，再更新 Secret MIUI_COOKIE')
         return
 
     random_sleep()
@@ -1667,6 +1668,16 @@ def main():
         except Exception as e:
             w_log('发送钉钉通知出错：%s: %s' % (type(e).__name__, e))
         s_log(config.get('logging'))
+
+    # 有账号没跑成功就以非零退出码结束：否则 Actions 会显示绿色成功，
+    # Cookie 过期这种「什么都没做」的失败会被当成正常跑完，没人会发现。
+    failed = [e for e in RUN_REPORT if not e.get('ok')]
+    if failed:
+        w_log('本次运行有 %d 个账号未成功，退出码置 1' % len(failed))
+        for e in failed:
+            w_log('  账号 %s 失败原因：%s' % (e.get('uid') or '(来自 Cookie)',
+                                            e.get('error') or '未完成'))
+        exit(1)
 
 
 def main_handler(event, context):
