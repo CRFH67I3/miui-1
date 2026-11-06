@@ -20,3 +20,7 @@ venv/
 .idea/workspace.xml
 .DS_Store
 .workbuddy/
+
+# 真机 / 模拟器调试产物（截图、界面树、logcat）
+_emu/
+_real/
