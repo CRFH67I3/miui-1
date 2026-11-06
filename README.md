@@ -178,7 +178,11 @@ python run_local.py --login --check
 
 Actions → `MIUI Task` → `Run workflow` → 选 `master` → 绿色按钮。想恢复云端定时，把 `on.schedule` 那两行取消注释即可。
 
+### **仓库说明**：
 
+只维护 `miui-1` 这一个仓库。
+
+旧的 `miui-task` 仓库已并入本仓库，历史保存在分支 `archive/miui-task`（对应本仓库 `ec75a36`，2026-11-03 09:11 的快照）。经逐文件比对，该快照**没有**本仓库缺失的内容——唯一多出的 `.github/workflows/schedule-probe.yml` 是当时的临时诊断探针，下一个提交 `8c7530a` 就把它删了。所以 `miui-task` 可以安全删除，代码和历史都不会丢。
 
 ### **项目依赖**：
   1. 需要前往 Python 官网自行下载自己系统对应的 Python 版本，或使用自己系统对应的包管理安装，推荐至少 Python 3.6 以上
