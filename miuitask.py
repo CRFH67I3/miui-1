@@ -1550,7 +1550,7 @@ def start(miui_task: MIUITask, check_in: bool, carrot_pull: bool, browse_special
     random_sleep()
     if not miui_task.mi_login():
         entry['error'] = ('登录失败（Cookie 已过期或账号需要短信验证）'
-                          '→ 本机 python run_local.py --login 重新获取，再更新 Secret MIUI_COOKIE')
+                          '→ 本机执行 python run_local.py --login 重新登录')
         return
 
     random_sleep()

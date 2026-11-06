@@ -31,8 +31,10 @@ name: MIUI Task
 # 列表里有这条且未完成才执行，没有就一次请求都不发。
 
 on:
-  schedule:
-    - cron: '17 19 * * *'
+  # 定时任务已停用：本仓库改为在本机（Windows 计划任务）运行，见 README「本机定时运行」。
+  # 保留手动触发，方便在云端对比复现问题。
+  # schedule:
+  #   - cron: '17 19 * * *'
   workflow_dispatch:
     inputs:
       login_mode:

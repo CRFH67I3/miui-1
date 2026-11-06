@@ -120,26 +120,64 @@ dingtalk:
 通知失败不影响任务退出码：token 错、加签不对只会让这次没消息，脚本仍按原结果结束。
 
 
-### **在 Actions 里运行**：
+### **在本机定时运行（推荐）**：
 
-配置完 Secret 后不需要额外操作，工作流有两种触发方式：
+不再依赖 GitHub Actions：任务在本机跑，用的是本机家宽 IP，和手机上打开社区的出口一致，风控概率更低。
 
-| 方式 | 怎么触发 | 说明 |
-| --- | --- | --- |
-| 定时 | 无需操作 | `17 19 * * *`（UTC）= **北京时间每天 03:17**。故意避开整点：整点队列最拥堵，排队任务可能被直接丢弃。即便如此，实际触发仍可能延迟几分钟到数小时，属 GitHub 侧行为 |
-| 手动 | Actions → `MIUI Task` → `Run workflow` → 选 `master` → 绿色按钮 | 随时可点，不受定时影响 |
+**一、先登录一次，拿到 Cookie 缓存**
 
-一次运行大约 3~8 分钟。结束后：
+```powershell
+cd C:\Users\Admin\Desktop\Projects\miui-1
+python run_local.py --login --check
+```
 
-- 想看待办明细 → 点进这次运行，展开 `Run MIUI Task` 步骤看实时日志
-- 想看完整日志 → 页面底部 `Artifacts` 下载 `miui-logs`（保留 7 天）
-- 想看结果摘要 → 群里收到的钉钉消息
+成功后 Cookie 落到 `.miui_cookie`（已 gitignore），之后每天复用，不用再输密码。
 
-两个容易忽略的点：
+**二、注册每日计划任务**
 
-**签到是幂等的**，同一小时内手动点几次也不会重复签到——脚本先查签到页，已签就一个请求都不发。所以「今天已经跑过了」不是问题，重复触发只是白跑一遍。
+`run_daily.cmd` 已就位（内部就是 `python -u run_local.py --auto`，日志写到 `logs/scheduler.log`）。注册：
 
-**定时任务会被自动停用**：仓库连续 60 天没有任何提交时，GitHub 会停掉 schedule。收到 `This scheduled workflow is disabled` 邮件或发现日志断更，去 Actions 页点一下 `Enable workflow` 即可。
+```powershell
+$root = 'C:\Users\Admin\Desktop\Projects\miui-1'
+$action  = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument ('/c "' + $root + '\run_daily.cmd"') -WorkingDirectory $root
+$trigger = New-ScheduledTaskTrigger -Daily -At '10:00'
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
+Register-ScheduledTask -TaskName 'MIUI社区每日签到' -Action $action -Trigger $trigger -Settings $settings -Description '本机运行小米社区成长值任务' -Force
+```
+
+- `-StartWhenAvailable`：到点时电脑关机/睡眠，会在下次开机后补跑
+- 改时间：`Set-ScheduledTask -TaskName 'MIUI社区每日签到' -Trigger (New-ScheduledTaskTrigger -Daily -At '03:17')`
+- 删任务：`Unregister-ScheduledTask -TaskName 'MIUI社区每日签到' -Confirm:$false`
+- 临时跑一次：`Start-ScheduledTask -TaskName 'MIUI社区每日签到'`
+
+**三、看结果**
+
+| 位置 | 内容 |
+| --- | --- |
+| `logs\scheduler.log` | 每次运行的时间戳与退出码（0 成功 / 1 有账号失败） |
+| `logs\YYYY-MM-DD.log` | 当次完整日志（任务解析、执行、成长值变化） |
+| 钉钉 | 配了 `DINGTALK_TOKEN` 就会推摘要 |
+| 桌面通知 | 没配钉钉且运行失败时，Windows 右下角弹一条 |
+
+**四、两件要知道的事**
+
+**Cookie 大约 37 小时就失效**（实测两份都是这个量级）。失效时运行会失败、退出码 1，钉钉/桌面通知会提示，重新执行一次：
+
+```powershell
+python run_local.py --login --check
+```
+
+不需要清缓存也不需要改任何配置，`.miui_cookie` 会被覆盖。
+
+**App 内「每日签到」（+1~+2）无法自动化**：接口 `checkinV2` 强制要求人机校验票据（空参会返回 `status 640`），票据只能由小米自家的 `miverify` 验证码产生，而它依赖 App 的 JSBridge，在桌面浏览器里初始化会一直停在「环境安全检测中」。实测把 UA 伪装成手机、加同源代理都不行。这一项请在手机 App 里点一次，其余任务（小程序签到 +3、浏览帖子 +1）全部自动。
+
+
+### **在 Actions 里运行（定时已停用）**：
+
+`run-task.yml` 的 `schedule` 已注释掉，避免和本机任务重复跑、也避免 Secret 里的旧 Cookie 天天报红。仍保留手动触发：
+
+Actions → `MIUI Task` → `Run workflow` → 选 `master` → 绿色按钮。想恢复云端定时，把 `on.schedule` 那两行取消注释即可。
+
 
 
 ### **项目依赖**：

@@ -13,6 +13,8 @@
 import base64
 import hashlib
 import hmac
+import os
+import subprocess
 import time
 import urllib.parse
 
@@ -171,3 +173,40 @@ def notify_run_result(entries, started_at=None):
         return False
     title = '小米社区任务结果 %s' % time.strftime('%m-%d %H:%M', time.localtime())
     return send_dingtalk(title, format_report(entries, started_at))
+
+
+# Windows 桌面通知：计划任务无人值守时，出问题总得让人看见。
+# 走系统自带的 ToastNotificationManager，不装任何第三方库。
+_TOAST_PS = r'''
+$ErrorActionPreference = 'Stop'
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime] > $null
+$t = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$n = $t.GetElementsByTagName('text')
+$n.Item(0).AppendChild($t.CreateTextNode(%s)) > $null
+$n.Item(1).AppendChild($t.CreateTextNode(%s)) > $null
+$toast = [Windows.UI.Notifications.ToastNotification]::new($t)
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('MIUI Task').Show($toast)
+'''
+
+
+def _ps_quote(text):
+    return "'" + str(text).replace("'", "''") + "'"
+
+
+def popup(title, message, timeout=20):
+    """
+    弹一条 Windows 桌面通知。失败静默（非 Windows、被组策略禁用等都不该影响主流程）。
+    中文用 -EncodedCommand 传，绕开命令行编码问题。
+    """
+    if os.name != 'nt':
+        return False
+    try:
+        script = _TOAST_PS % (_ps_quote(title), _ps_quote(message))
+        encoded = base64.b64encode(script.encode('utf-16-le')).decode('ascii')
+        subprocess.run(
+            ['powershell', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+            capture_output=True, timeout=timeout)
+        return True
+    except Exception as e:
+        w_log('桌面通知发送失败：%s: %s' % (type(e).__name__, e))
+        return False

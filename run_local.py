@@ -299,6 +299,8 @@ def main():
     parser.add_argument('--cookie', action='store_true',
                         help='用已登录的社区 Cookie 登录（跳过账号密码与短信验证）')
     parser.add_argument('--login', action='store_true', help='忽略本地 Cookie 缓存，强制账号密码登录')
+    parser.add_argument('--auto', action='store_true',
+                        help='无人值守模式：只用本地缓存 Cookie，全程不提示输入（供计划任务调用）')
     parser.add_argument('--no-cache', action='store_true', help='不读写本地 Cookie 缓存 .miui_cookie')
     parser.add_argument('--show-cookie', action='store_true',
                         help='打印缓存的 Cookie，便于填到 Actions 的 MIUI_COOKIE')
@@ -340,7 +342,16 @@ def main():
 
     # Cookie 来源优先级：--cookie 粘贴 > 环境变量 > 本地缓存
     cookie = ''
-    if args.cookie:
+    if args.auto:
+        # 无人值守：只认缓存/环境变量，绝不 prompts；没有就直接失败，
+        # 让计划任务的退出码与钉钉消息都明确指向「该重新登录了」
+        cookie = os.environ.get('MIUI_COOKIE', '').strip() or load_cached_cookie()
+        if not cookie:
+            print('[中止] --auto 需要可用的 Cookie，但本地缓存为空。')
+            print('       请先在本机运行一次：python run_local.py --login')
+            return 3
+        w_log('无人值守模式：使用本地缓存 Cookie')
+    elif args.cookie:
         cookie = read_credential(
             '粘贴社区 Cookie（浏览器 F12 > Network > 任意 api.vip.miui.com 请求 > Cookie）: ',
             'MIUI_COOKIE')
@@ -355,7 +366,9 @@ def main():
     cookie_mode = bool(cookie)
 
     if cookie_mode:
-        uid = read_credential('小米账户 ID（直接回车则从 Cookie 读取）: ', 'MIUI_UID')
+        # 无人值守时 uid 交给 Cookie 里的 userId，不弹输入框
+        uid = '' if args.auto else read_credential(
+            '小米账户 ID（直接回车则从 Cookie 读取）: ', 'MIUI_UID')
         raw_password = ''
         password = ''
     else:
@@ -374,7 +387,10 @@ def main():
         # 与 format_config 保持一致：32 位视为已加密，否则转大写 MD5
         password = raw_password if len(raw_password) == 32 else md5_crypto(raw_password).upper()
 
-    ua = read_credential('User-Agent（直接回车用默认值）: ', 'MIUI_USER_AGENT') or args.ua or DEFAULT_UA
+    if args.auto:
+        ua = os.environ.get('MIUI_USER_AGENT', '').strip() or args.ua or DEFAULT_UA
+    else:
+        ua = read_credential('User-Agent（直接回车用默认值）: ', 'MIUI_USER_AGENT') or args.ua or DEFAULT_UA
 
     w_log('---------- 本次运行配置 ----------')
     w_log('登录方式：' + ('Cookie（跳过密码与短信验证）' if cookie_mode else '账号密码（需要时会走短信验证）'))
@@ -409,6 +425,7 @@ def main():
 
     # 只读模式（--check / --tasks）不发通知，免得调试时刷屏
     started_at = time.time()
+    code = 0
     try:
         if args.check or args.tasks:
             code = check_only(task, switches, growth_only=growth_only)
@@ -419,16 +436,24 @@ def main():
                   browse_specialpage=args.specialpage,
                   legacy=args.legacy,
                   growth_only=growth_only)
-            code = 0
+            # 与 miuitask.main 保持一致：只要有一个账号没成功就返回非零，
+            # 计划任务靠这个退出码判断该不该弹提示
+            code = 1 if [e for e in miuitask.RUN_REPORT if not e.get('ok')] else 0
     finally:
         # 登录成功后缓存 Cookie，下次免登录、少一次短信验证
         if task.cookie and not args.no_cache:
             save_cached_cookie(task.cookie)
         if not (args.check or args.tasks):
+            sent = False
             try:
-                notifier.notify_run_result(miuitask.RUN_REPORT, started_at)
+                sent = notifier.notify_run_result(miuitask.RUN_REPORT, started_at)
             except Exception as e:
                 w_log('发送钉钉通知出错：%s: %s' % (type(e).__name__, e))
+            # 无人值守时没人盯着终端，失败必须能在桌面上看见
+            if args.auto and code != 0 and not sent:
+                failed = [e for e in miuitask.RUN_REPORT if not e.get('ok')]
+                reason = failed[0].get('error') if failed else '运行未成功，详见 logs 目录'
+                notifier.popup('小米社区任务失败', str(reason)[:120])
         # 归档日志便于回看；logs/ 已在 .gitignore 中
         utils.s_log(True)
 
